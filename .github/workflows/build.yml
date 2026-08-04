@@ -1,0 +1,161 @@
+name: Build DRH LUDO Android
+
+# Yeh workflow har push par + manually trigger karne par chalti hai.
+# 3 outputs banata hai:
+#   1. Debug APK (universal)          → sideload / test build
+#   2. Release APK per ABI (unsigned) → sideload production build
+#   3. Release AAB (unsigned)         → Google Play Store upload ke liye
+#
+# Signing note: yeh workflow apne aap DEBUG-signed release banata hai
+# taaki sirf phone par install ho sake. Play Store upload ke liye
+# aap "release-signed" job use karo (neeche) — usme apna keystore
+# GitHub Secrets mein daalna hoga.
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:      # <- mobile browser se "Run workflow" button
+
+jobs:
+  build:
+    name: Build APK + AAB
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.35.5'
+          cache: true
+
+      - name: Show Flutter version
+        run: flutter --version
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons || true
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+      # ---------- DEBUG APK ----------
+      - name: Build DEBUG APK (universal)
+        run: flutter build apk --debug
+
+      - name: Upload DEBUG APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: drh-ludo-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+
+      # ---------- RELEASE APK per ABI ----------
+      - name: Build RELEASE APK (split per ABI, debug-signed)
+        run: flutter build apk --release --split-per-abi
+
+      - name: Upload RELEASE APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: drh-ludo-release-apks
+          path: build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+
+      # ---------- RELEASE AAB ----------
+      - name: Build RELEASE AAB (for Play Store, debug-signed)
+        run: flutter build appbundle --release
+
+      - name: Upload RELEASE AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: drh-ludo-release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+  # OPTIONAL job: sirf tab chalti hai jab aap keystore secrets add karo.
+  # Play Store upload ke liye yehi output use hoga.
+  release-signed:
+    name: Build SIGNED Release (Play Store ready)
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: build
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.35.5'
+          cache: true
+
+      - name: Decode keystore
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+
+      - name: Create key.properties
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD:  ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD:    ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS:       ${{ secrets.KEY_ALIAS }}
+        run: |
+          cat > android/key.properties <<EOF
+          storePassword=$STORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=upload-keystore.jks
+          EOF
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons || true
+
+      - name: Build SIGNED release AAB
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        run: flutter build appbundle --release
+
+      - name: Build SIGNED release APKs
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        run: flutter build apk --release --split-per-abi
+
+      - name: Upload SIGNED artifacts
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: drh-ludo-SIGNED-playstore
+          path: |
+            build/app/outputs/bundle/release/app-release.aab
+            build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: warn
