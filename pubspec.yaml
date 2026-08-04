@@ -1,0 +1,33 @@
+name: drh_ludo
+description: "DRH LUDO — Play & become Ludo Champion. Offline vs AI, Local 2-4 Multiplayer, Online rooms."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  shared_preferences: ^2.3.2
+  google_fonts: ^6.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: false
+  image_path: "assets/branding/app_icon.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#0B1B3D"
+  adaptive_icon_foreground: "assets/branding/app_icon.png"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/branding/
